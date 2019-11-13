@@ -33,6 +33,9 @@ A first look at the data reveals more information about the problem that we are 
 
 3 - The test data set contains the same variables as the training dataset, however many of these variables have no valid values at all in the dataset. Since they are not going to be valuable for the prediction of the values of the dataset, they will not be considered for the analysis.
 
+4 - Since the data is grouped in series of measurements, there could be a strong correlation between elements in the same series. Unless proper care is take, the prediction might tend be more associated with associating datapoints with an existing series than with correctly cathegorizing a data point in one of the 6 classes by itself, independently of which series it was included in.
+
+
 ### Cleaning up of data
 
 According to the previous observations:
@@ -65,14 +68,18 @@ are_there_any_nas <- length(train_valid_sensor_data_df$roll_belt) != length(comp
 
 ### Data Slicing
 
-There are now 52 columns of numeric data in the training dataset. The next step is to slice out a subset of our training set in order to verify the prediction algorithm.
+There are now 52 columns of numeric data in the training dataset. The next step is to slice out a subset of our training set in order to verify the prediction algorithm. In order to verify if the prediction algorithm really cathegorizes datapoints by themselves in one of the existing 5 classes, the split will be based on "num_window". This will put only complete series in both the training set and the data set.
 
 
 ```{r slice_out_verify}
-## Slice out 30% of data
-inTrain <- createDataPartition(y=train_valid_sensor_data_df$classe, p=0.7, list=FALSE)
-my_train_df <- train_valid_sensor_data_df[inTrain,]
-my_verify_df <- train_valid_sensor_data_df[-inTrain,]
+## Slice out aprox. 30% of data
+inTrain <- createDataPartition(y=series_classe$classe, p=0.7, list=FALSE)
+train_valid_sensor_data_df$num_window <- train_csv_df$num_window
+my_train_df_and_user_name <- train_valid_sensor_data_df[train_valid_sensor_data_df$num_window %in% inTrain,]
+my_verify_df_and_user_name <- train_valid_sensor_data_df[!(train_valid_sensor_data_df$num_window %in% inTrain),]
+## Remove the num_window column now
+my_train_df <- my_train_df_and_user_name[,-length(colnames(my_train_df_and_user_name))]
+my_verify_df <- my_verify_df_and_user_name[,-length(colnames(my_verify_df_and_user_name))]
 ```
 
 ### Normalizing the Data
@@ -81,8 +88,8 @@ There are 52 columns of numeric data in the training dataset now. Since it seems
 
 ```{r normalize_data}
 ## Normalization of data, using all columns except for the last one
-preObj <- preProcess(my_train_df[,-length(colnames(my_train_df))], method=c("center", "scale"))
-my_train_normalized_df <- predict(preObj, my_train_df[,-length(colnames(my_train_df))])
+preNormalization <- preProcess(my_train_df[,-length(colnames(my_train_df))], method=c("center", "scale"))
+my_train_normalized_df <- predict(preNormalization, my_train_df[,-length(colnames(my_train_df))])
 ```
 
 ### Principal Component Analysis
@@ -112,8 +119,8 @@ At this point, since we have six different users in the system, I would like to 
 
 ```{r relationship_with_user_name}
 train_data <- trainPC
-train_data$user_name <- train_csv_df[inTrain,]$user_name
-train_data$classe <- train_csv_df[inTrain,]$classe
+train_data$user_name <- train_csv_df[train_csv_df$num_window %in% inTrain,]$user_name
+train_data$classe <- train_csv_df[train_csv_df$num_window %in% inTrain,]$classe
 ```
 
 ```{r plot_1, echo=FALSE}
@@ -123,18 +130,70 @@ qplot(user_name, PC1, data=train_data, fill=classe, geom=c("boxplot"))
 
 ### Poll Ensemble
 
-The goal is to train a classifier per user name. Each classifier will be the result of a poll between a Random Forest, a K Nearest Neighbors and a Naive Bayes classifiers.
+The goal is to train a classifier per user name. Each classifier will be the result of a poll between a Random Forest, a K Nearest Neighbors and a Naive Bayes classifiers. The prediction will be made by selecting the class that has a majority vote, in case of each classifier voting for a different class, the first vote will be taken.
 
 ```{r poll_ensemble}
 all_users <- levels(train_csv_df$user_name)
 all_methods <- c('rf', 'knn', 'nb')
-my_models <- expand.grid(user=all_users, algorithms=all_methods)
-my_models$model <- train(classe ~ ., data=train_data[train_data$user_name == my_models$user,-21], method=my_models$method)
+my_models <- expand.grid(user_name=all_users, method=all_methods)
+
+train_model = function(row, output) {
+    row_user_name <- row[1]
+    row_method <- row[2]
+    row_train_data <- train_data[train_data$user_name == row_user_name, -21]
+    train(classe ~ ., data=row_train_data, method=row_method)
+}
+my_model_list <- apply(my_models, 1, train_model)
+
+tally_votes <- function(row, output) {
+    votes <- row[(length(row)-2):length(row)]
+    ifelse(length(votes) < 3 | votes[2] != votes[3], votes[1], votes[2])
+}
+
+ensemble_predict <- function(input_data_frame) {
+    input_data_frame$prediction <- NA
+    for (user_name in levels(input_data_frame$user_name)) {
+        data_frame = input_data_frame[input_data_frame$user_name == user_name,]
+        index = which(my_models$user_name == user_name & my_models$method == 'rf')
+        model = my_model_list[index]
+        data_frame$predict_rf <- predict(model, data_frame)[[1]]
+        index = which(my_models$user_name == user_name & my_models$method == 'knn')
+        model = my_model_list[index]
+        data_frame$predict_knn <- predict(model, data_frame)[[1]]
+        index = which(my_models$user_name == user_name & my_models$method == 'nb')
+        model = my_model_list[index]
+        data_frame$predict_nb <- predict(model, data_frame)[[1]]
+    }
+    input_data_frame$prediction <- apply(input_data_frame, 1, tally_votes)
+    input_data_frame
+}
 
 ```
 
 ### Results
 
-```{r estimated_accuracy}
+The accuracy of the ensemble classifier in the verification dataset is shown in the following confusion matrix.
 
+```{r estimated_accuracy}
+my_verify_normalized_df <- predict(preNormalization, my_verify_df[,-length(colnames(my_verify_df))])
+verifyPC <- predict(prePCA_caret, my_verify_normalized_df)
+verify_data <- verifyPC
+verify_data$user_name <- train_csv_df[!(train_csv_df$num_window %in% inTrain),]$user_name
+verify_data <- ensemble_predict(verify_data)
+classe <- train_csv_df[!(train_csv_df$num_window %in% inTrain),]$classe
+confusionMatrix(verify_data$prediction, classe)
+
+```
+
+It is even possible to check the predictions in the test dataset, since there is a function that obtains the class of the corresponding data series.
+
+```{r accuracy_on_test_set}
+test_valid_sensor_data_df <- test_csv_df[,!cols_all_na][,seq(8,59)]
+my_test_normalized_df <- predict(preNormalization, my_test_df[,-length(colnames(my_test_df))])
+testPC <- predict(prePCA_caret, my_test_normalized_df)
+test_data <- testPC
+test_data$user_name <- test_csv_df$user_name
+test_data <- ensemble_predict(test_data)
+classe <- apply(test_data, 1, get_classe)
+confusionMatrix(test_data$prediction, classe)
 ```
