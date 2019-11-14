@@ -65,7 +65,6 @@ train_valid_sensor_data_df <- train_csv_df[,!cols_all_na][,seq(8,59)]
 train_valid_sensor_data_df$classe <- train_csv_df$classe
 ## There are no NA values now in the dataframe
 are_there_any_nas <- length(train_valid_sensor_data_df$roll_belt) != length(complete.cases(train_valid_sensor_data_df))
-
 ```
 
 ### Data Slicing
@@ -73,42 +72,41 @@ are_there_any_nas <- length(train_valid_sensor_data_df$roll_belt) != length(comp
 There are now 52 columns of numeric data in the training dataset. The next step is to slice out a subset of our training set in order to verify the prediction algorithm. In order to verify if the prediction algorithm really cathegorizes datapoints by themselves in one of the existing 5 classes, the split will be based on "num_window". This will put only complete series in both the training set and the data set. There will be two splits in order to combine different algorithms in an ensemble later.`
 
 ```{r slice_out_verify}
-## Slice out aprox. 25% of data
+## Slice out aprox. 25% of data of the total training dataset
 inTrainAll <- createDataPartition(y=series_classe$classe, p=0.75, list=FALSE)
+## Slice out aprox. 25% of data again to set aside for training the ensemble
 inTrain <- createDataPartition(y=series_classe[inTrainAll,]$classe, p=0.75, list=FALSE)
+## Recover series identification information
 train_valid_sensor_data_df$num_window <- train_csv_df$num_window
-inTrainVerify <- !(train_valid_sensor_data_df$num_window %in% series_classe[inTrainAll,]$num_window)
+## Data for final verification of the ensemble
+inVerify <- train_valid_sensor_data_df$num_window %in% series_classe[-inTrainAll,]$num_window
+## Data for training the models
 inTrainModels <- !inVerify & (train_valid_sensor_data_df$num_window %in% series_classe[inTrain,]$num_window)
+## Data for training the ensemble of models
 inTrainEnsemble <- !inVerify & !inTrainModels
-my_verify_df_and_user_name <- train_valid_sensor_data_df[inVerify,]
-my_train_ensemble_df_and_user_name <- train_valid_sensor_data_df[inTrainEnsemble,]
-my_train_df_and_user_name <- train_valid_sensor_data_df[inTrain,]
+## Datasets for each of the 3 partitions
+my_verify_df_with_num_window <- train_valid_sensor_data_df[inVerify,]
+my_train_ensemble_df_with_num_window <- train_valid_sensor_data_df[inTrainEnsemble,]
+my_train_df_with_num_window <- train_valid_sensor_data_df[inTrainModels,]
 ## Remove the num_window column now
-my_train_df <- my_train_df_and_user_name[,-length(colnames(my_train_df_and_user_name))]
-my_train_ensemble_df <- my_train_ensemble_df_and_user_name[,-length(colnames(my_train_df_and_user_name))]
-my_verify_df <- my_verify_df_and_user_name[,-length(colnames(my_verify_df_and_user_name))]
+my_train_df <- my_train_df_with_num_window[,-length(colnames(my_train_df_with_num_window))]
+my_train_ensemble_df <- my_train_ensemble_df_with_num_window[,-length(colnames(my_train_df_with_num_window))]
+my_verify_df <- my_verify_df_with_num_window[,-length(colnames(my_verify_df_with_num_window))]
 ```
 
 ### Preprocessing the Data
 
-There are 52 columns of numeric data in the training dataset now. In order to help convergence of algorithms, and in order to be able to compare the relevance of parameters with similar units and in general reduce the complexity of processing, normalization and PCA will be applied. It is assumed that losing interpretability in these complex sensor data is a good tradeoff.
+There are 52 columns of numeric data in the training dataset now. In order to help convergence of algorithms, and in order to be able to compare the relevance of parameters, normalization and PCA will be applied.
 
 ```{r preprocessing_data}
 ## Preprocessing of data, using all columns except for the last one
-preProcessing <- preProcess(my_train_df[,-length(colnames(my_train_df))], method=c("center", "scale", "pca"))
+preNormalization <- preProcess(my_train_df[,-length(colnames(my_train_df))], method=c("center", "scale"))
 my_train_normalized_df <- predict(preNormalization, my_train_df[,-length(colnames(my_train_df))])
-```
-
-### Principal Component Analysis
-
-In order to get a first idea of which is the relative importance of variables, with a set of numerical variables, as the one on the table right now, it seems a good idea to apply Principal Component Analysis.
-
-```{r principal_component_analysis}
 ## Principal Component Analysis using caret
 prePCA <- prcomp(my_train_normalized_df)
 ```
 
-The following figure shows the percentage of variance explained by each of the principla components. The first 20 principal components explain more than 90% of the variance in the dataset.
+The following figure shows the percentage of variance explained by each of the principal components. The first 20 principal components explain more than 90% of the variance in the dataset, so there is a lot of redundancy.
 
 ```{r variance_explained}
 std_dev <- prePCA$sdev
@@ -122,24 +120,69 @@ trainPC <- predict(prePCA_caret, my_train_normalized_df)
 
 ### Generalization for Different Users
 
-At this point, since we have six different users in the system, I would like to know if the data under analysis is similar to one user to the other. Even though only datapoints from this six different are present in the test dataset, it seems interesting to know if the prediction should be done in a user per user basis or can be applied to data coming from any user. The following figure shows a clear difference in the data collected from each of the users. This would mean that (at least until data from more users is present) it would make sense to produce predictions per user.
+At this point, since we have six different users in the system, I would like to know if the data under analysis is similar from one user to the other. Even though only datapoints from this six different are present in the test dataset, it seems interesting to know if the prediction should be done in a user per user basis or can be applied to data coming from any user. The following figure shows a clear difference in the data collected from each of the users. This would mean that (at least until data from more users is present) it would make sense to produce predictions per user. "user_name" will be added to the Principal Components as input to the models, and it will not be reliable to predict the "classe" for datapoints that have a "user_name" that was not included in the training set. Fortunately, this does not occur in our current test data.
 
 ```{r relationship_with_user_name}
-train_data <- trainPC
-train_data$user_name <- train_csv_df[train_csv_df$num_window %in% inTrain,]$user_name
-train_data$classe <- train_csv_df[train_csv_df$num_window %in% inTrain,]$classe
+train_data_rf <- my_train_df
+train_data_rf$user_name <- train_csv_df[inTrainModels,]$user_name
+train_data_rf$classe <- train_csv_df[inTrainModels,]$classe
+dummy <- dummyVars(~ user_name, train_csv_df[inTrainModels,])
+train_data_knn <- cbind(trainPC, 10 * predict(dummy, train_csv_df[inTrainModels,]))
+train_data_knn$classe <- train_csv_df[inTrainModels,]$classe
+
 ```
 
 ```{r plot_1, echo=FALSE}
-qplot(user_name, PC1, data=train_data, fill=classe, geom=c("boxplot"))
-
+qplot(train_data_rf$user_name, train_data_knn$PC1, fill=train_data_knn$classe, geom=c("boxplot"))
 ```
 
 ### Poll Ensemble
 
-The goal is to train a classifier per user name. Each classifier will be the result of a poll between a Random Forest, a K Nearest Neighbors and a Naive Bayes classifiers. The prediction will be made by selecting the class that has a majority vote, in case of each classifier voting for a different class, the first vote will be taken.
+The goal is to train a ensemble of a Random Forest, a K Nearest Neighbors and a Naive Bayes classifiers.
 
 ```{r poll_ensemble}
+## Since these are computationally expensive, set up parallel processing
+library(doParallel)
+cl <- makePSOCKcluster(4)
+registerDoParallel(cl)
+## Training of the three models
+nb_model <- train(classe ~ ., data=train_data, method='nb')
+## Predictions on the training set for the ensemble
+train_ensemble_data_rf <- my_train_ensemble_df
+train_ensemble_data_rf$user_name <- train_csv_df[inTrainEnsemble,]$user_name
+train_ensemble_data_rf$classe <- train_csv_df[inTrainEnsemble,]$classe
+rf_model <- train(classe ~ ., data=train_data_rf, method='rf')
+prePCA_ensemble <- prcomp(my_train_normalized_df)
+my_train_ensemble_normalized_df <- predict(preNormalization, my_train_ensemble_df[,-length(colnames(my_train_ensemble_df))])
+trainEnsemblePC <- predict(prePCA_caret, my_train_ensemble_normalized_df)
+train_ensemble_data_knn <- cbind(trainEnsemblePC, 10 * predict(dummy, train_csv_df[inTrainEnsemble,]))
+train_ensemble_data_knn$classe <- train_csv_df[inTrainEnsemble,]$classe
+knn_model <- train(classe ~ ., data=train_data_knn, method='knn')
+nb_model <- train(classe ~ ., data=train_data_knn, method='nb')
+nb_model <- train(classe ~ ., data=train_data_rf, method='nb')
+train_ensemble_data <- data.frame(train_csv_df[inTrainEnsemble,]$classe)
+train_ensemble_data$prediction_rf <- predict(rf_model, train_ensemble_data_rf)
+train_ensemble_data$prediction_knn <- predict(knn_model, train_ensemble_data_knn)
+train_ensemble_data$prediction_nb <- predict(nb_model, train_ensemble_data)
+## Measure accuracy for each of the models
+confusionMatrix(train_ensemble_data$prediction_rf, train_ensemble_data$classe)
+confusionMatrix(train_ensemble_data$prediction_knn, train_ensemble_data$classe)
+confusionMatrix(train_ensemble_data$prediction_nb, train_ensemble_data$classe)
+## Build a new model that combines the predictions
+predDF <- data.frame(
+  train_ensemble_data$prediction_rf,
+  train_ensemble_data$prediction_knn,
+  train_ensemble_data$prediction_nb,
+  classe=train_ensemble_data$classe)
+classe_levels <- levels(train_ensemble_data$classe)
+train_ensemble_data$prediction_ensemble_str <- ifelse(
+  train_ensemble_data$prediction_nb == train_ensemble_data$prediction_rf,
+  classe_levels[train_ensemble_data$prediction_nb],
+  classe_levels[train_ensemble_data$prediction_knn])
+train_ensemble_data$prediction_ensemble <- as.factor(train_ensemble_data$prediction_ensemble_str)
+## Measure accuracy for the ensemble
+confusionMatrix(train_ensemble_data$prediction_ensemble, train_ensemble_data$classe)
+
 all_users <- levels(train_csv_df$user_name)
 all_methods <- c('rf', 'knn', 'nb')
 my_models <- expand.grid(user_name=all_users, method=all_methods)
