@@ -168,6 +168,8 @@ confusionMatrix(train_ensemble_data$prediction_rf, train_ensemble_data$classe)
 confusionMatrix(train_ensemble_data$prediction_knn, train_ensemble_data$classe)
 confusionMatrix(train_ensemble_data$prediction_svm, train_ensemble_data$classe)
 ## Build a new model that combines the predictions
+ensemble_model <- train(classe ~ prediction_rf + prediction_knn + prediction_svm, data=train_ensemble_data, method='rf')
+train_ensemble_data$prediction_ensemble <- predict(ensemble_model, train_ensemble_data)
 predDF <- data.frame(
   train_ensemble_data$prediction_rf,
   train_ensemble_data$prediction_knn,
