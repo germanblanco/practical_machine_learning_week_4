@@ -14,7 +14,7 @@ library(ggplot2)
 
 ## Physical Exercise Quality Prediction
 
-This is the Peer-graded Assignment exercise of week 4 (the last week) of Coursera course "Practical Machine Learning". The goal is to predict quality of physical exercise on the Weight Lifting Exercise Dataset referred [here](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har).
+This is the Peer-graded Assignment exercise of week 4 (the last week) of Coursera course "Practical Machine Learning". The goal is to predict quality of physical exercise on the Weight Lifting Exercise Dataset described in [this page](http:/groupware.les.inf.puc-rio.br/har).
 
 ### Problem analysis
 
@@ -27,13 +27,13 @@ A first look at the data reveals more information about the problem that we are 
 
 ### Observations on the exercise objectives:
 
-1 - The training dataset contains series of samples, rather than individual instances. Each series of samples seems to be indentified by a "user_name" and a "sequence_number". All series of samples provided have the same value of "classe", which indicates that it is the series of samples that is classified, instead of the individual instances. There seems to be a chance of aggregating the data of a series of samples in a meaningful way in order to produce a classification of the complete series.
+1 - The training dataset contains series of samples, rather than individual instances. Each series of samples seems to be identified by a "user_name" and a "sequence_number". All series of samples provided have the same value of "classe", which indicates that it is the series of samples that is classified, instead of the individual instances. There seems to be an opportunity of aggregating the data of a series of samples in a meaningful way in order to produce a classification of the complete series.
 
 2 - On the other hand, the testing dataset contains only individual instances of the series. There are data points in the training set of the same series as those in the test dataset. It seems that the goal to predict the "classe" of each of this intances in the test set, without any interpretation of what the data is about, may be achieved by looking at the "classe" of the series of the test datapoints in the training set. However, reading what the experiment is about, it seems that the question should be about detecting the quality of the exercise by looking at the data obtained with the sensors. It would seem that an aggregation of the data of each of the series could provide more information to do this, but in the test set only one instance of data point per series is provided, and that seems to indicate that the goal is to identify the quality of the exercise by looking at the sensor data of just one data point of the series.
 
 3 - The test data set contains the same variables as the training dataset, however many of these variables have no valid values at all in the dataset. Since they are not going to be valuable for the prediction of the values of the dataset, they will not be considered for the analysis.
 
-4 - Since the data is grouped in series of measurements, there could be a strong correlation between elements in the same series. Unless proper care is take, the prediction might tend be more associated with associating datapoints with an existing series than with correctly cathegorizing a data point in one of the 6 classes by itself, independently of which series it was included in.
+4 - Since the data is grouped in series of measurements, there could be a strong correlation between elements in the same series. Unless proper care is taken, the prediction might tend to be more about associating datapoints with an existing series than with correctly cathegorizing a data point in one of the 6 classes by itself, independently of which series it was included in.
 
 
 ### Cleaning up of data
@@ -45,6 +45,8 @@ According to the previous observations:
 - Columns with no valid values in the test set will be filtered out.
 
 - Only sensor data will be considered.
+
+- Complete series will be used in training and test dataset.
 
 - It is also verified that there are no NA values in the training data.
 
@@ -68,27 +70,32 @@ are_there_any_nas <- length(train_valid_sensor_data_df$roll_belt) != length(comp
 
 ### Data Slicing
 
-There are now 52 columns of numeric data in the training dataset. The next step is to slice out a subset of our training set in order to verify the prediction algorithm. In order to verify if the prediction algorithm really cathegorizes datapoints by themselves in one of the existing 5 classes, the split will be based on "num_window". This will put only complete series in both the training set and the data set.
-
+There are now 52 columns of numeric data in the training dataset. The next step is to slice out a subset of our training set in order to verify the prediction algorithm. In order to verify if the prediction algorithm really cathegorizes datapoints by themselves in one of the existing 5 classes, the split will be based on "num_window". This will put only complete series in both the training set and the data set. There will be two splits in order to combine different algorithms in an ensemble later.`
 
 ```{r slice_out_verify}
-## Slice out aprox. 30% of data
-inTrain <- createDataPartition(y=series_classe$classe, p=0.7, list=FALSE)
+## Slice out aprox. 25% of data
+inTrainAll <- createDataPartition(y=series_classe$classe, p=0.75, list=FALSE)
+inTrain <- createDataPartition(y=series_classe[inTrainAll,]$classe, p=0.75, list=FALSE)
 train_valid_sensor_data_df$num_window <- train_csv_df$num_window
-my_train_df_and_user_name <- train_valid_sensor_data_df[train_valid_sensor_data_df$num_window %in% inTrain,]
-my_verify_df_and_user_name <- train_valid_sensor_data_df[!(train_valid_sensor_data_df$num_window %in% inTrain),]
+inTrainVerify <- !(train_valid_sensor_data_df$num_window %in% series_classe[inTrainAll,]$num_window)
+inTrainModels <- !inVerify & (train_valid_sensor_data_df$num_window %in% series_classe[inTrain,]$num_window)
+inTrainEnsemble <- !inVerify & !inTrainModels
+my_verify_df_and_user_name <- train_valid_sensor_data_df[inVerify,]
+my_train_ensemble_df_and_user_name <- train_valid_sensor_data_df[inTrainEnsemble,]
+my_train_df_and_user_name <- train_valid_sensor_data_df[inTrain,]
 ## Remove the num_window column now
 my_train_df <- my_train_df_and_user_name[,-length(colnames(my_train_df_and_user_name))]
+my_train_ensemble_df <- my_train_ensemble_df_and_user_name[,-length(colnames(my_train_df_and_user_name))]
 my_verify_df <- my_verify_df_and_user_name[,-length(colnames(my_verify_df_and_user_name))]
 ```
 
-### Normalizing the Data
+### Preprocessing the Data
 
-There are 52 columns of numeric data in the training dataset now. Since it seems that one of the goals would be to understand which of the sensor input data is more relevant, in order to make comparisons easier, normalizing the data seems a good idea.
+There are 52 columns of numeric data in the training dataset now. In order to help convergence of algorithms, and in order to be able to compare the relevance of parameters with similar units and in general reduce the complexity of processing, normalization and PCA will be applied. It is assumed that losing interpretability in these complex sensor data is a good tradeoff.
 
-```{r normalize_data}
-## Normalization of data, using all columns except for the last one
-preNormalization <- preProcess(my_train_df[,-length(colnames(my_train_df))], method=c("center", "scale"))
+```{r preprocessing_data}
+## Preprocessing of data, using all columns except for the last one
+preProcessing <- preProcess(my_train_df[,-length(colnames(my_train_df))], method=c("center", "scale", "pca"))
 my_train_normalized_df <- predict(preNormalization, my_train_df[,-length(colnames(my_train_df))])
 ```
 
