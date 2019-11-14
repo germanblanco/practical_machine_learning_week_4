@@ -127,7 +127,7 @@ train_data_rf <- my_train_df
 train_data_rf$user_name <- train_csv_df[inTrainModels,]$user_name
 train_data_rf$classe <- train_csv_df[inTrainModels,]$classe
 dummy <- dummyVars(~ user_name, train_csv_df[inTrainModels,])
-train_data_knn <- cbind(trainPC, 10 * predict(dummy, train_csv_df[inTrainModels,]))
+train_data_knn <- cbind(trainPC, predict(dummy, train_csv_df[inTrainModels,]))
 train_data_knn$classe <- train_csv_df[inTrainModels,]$classe
 
 ```
@@ -155,95 +155,46 @@ rf_model <- train(classe ~ ., data=train_data_rf, method='rf')
 prePCA_ensemble <- prcomp(my_train_normalized_df)
 my_train_ensemble_normalized_df <- predict(preNormalization, my_train_ensemble_df[,-length(colnames(my_train_ensemble_df))])
 trainEnsemblePC <- predict(prePCA_caret, my_train_ensemble_normalized_df)
-train_ensemble_data_knn <- cbind(trainEnsemblePC, 10 * predict(dummy, train_csv_df[inTrainEnsemble,]))
+train_ensemble_data_knn <- cbind(trainEnsemblePC, predict(dummy, train_csv_df[inTrainEnsemble,]))
 train_ensemble_data_knn$classe <- train_csv_df[inTrainEnsemble,]$classe
 knn_model <- train(classe ~ ., data=train_data_knn, method='knn')
-nb_model <- train(classe ~ ., data=train_data_knn, method='nb')
-nb_model <- train(classe ~ ., data=train_data_rf, method='nb')
+svm_model <- train(classe ~ ., data=train_data_rf, method='svm')
 train_ensemble_data <- data.frame(train_csv_df[inTrainEnsemble,]$classe)
 train_ensemble_data$prediction_rf <- predict(rf_model, train_ensemble_data_rf)
 train_ensemble_data$prediction_knn <- predict(knn_model, train_ensemble_data_knn)
-train_ensemble_data$prediction_nb <- predict(nb_model, train_ensemble_data)
+train_ensemble_data$prediction_svm <- predict(svm_model, train_ensemble_data_rf)
 ## Measure accuracy for each of the models
 confusionMatrix(train_ensemble_data$prediction_rf, train_ensemble_data$classe)
 confusionMatrix(train_ensemble_data$prediction_knn, train_ensemble_data$classe)
-confusionMatrix(train_ensemble_data$prediction_nb, train_ensemble_data$classe)
+confusionMatrix(train_ensemble_data$prediction_svm, train_ensemble_data$classe)
 ## Build a new model that combines the predictions
 predDF <- data.frame(
   train_ensemble_data$prediction_rf,
   train_ensemble_data$prediction_knn,
-  train_ensemble_data$prediction_nb,
+  train_ensemble_data$prediction_svm,
   classe=train_ensemble_data$classe)
 classe_levels <- levels(train_ensemble_data$classe)
 train_ensemble_data$prediction_ensemble_str <- ifelse(
-  train_ensemble_data$prediction_nb == train_ensemble_data$prediction_rf,
-  classe_levels[train_ensemble_data$prediction_nb],
-  classe_levels[train_ensemble_data$prediction_knn])
+  train_ensemble_data$prediction_svm == train_ensemble_data$prediction_knn,
+  classe_levels[train_ensemble_data$prediction_svm],
+  classe_levels[train_ensemble_data$prediction_rf])
 train_ensemble_data$prediction_ensemble <- as.factor(train_ensemble_data$prediction_ensemble_str)
 ## Measure accuracy for the ensemble
 confusionMatrix(train_ensemble_data$prediction_ensemble, train_ensemble_data$classe)
-
-all_users <- levels(train_csv_df$user_name)
-all_methods <- c('rf', 'knn', 'nb')
-my_models <- expand.grid(user_name=all_users, method=all_methods)
-
-train_model = function(row, output) {
-    row_user_name <- row[1]
-    row_method <- row[2]
-    row_train_data <- train_data[train_data$user_name == row_user_name, -21]
-    train(classe ~ ., data=row_train_data, method=row_method)
-}
-my_model_list <- apply(my_models, 1, train_model)
-
-tally_votes <- function(row, output) {
-    votes <- row[(length(row)-2):length(row)]
-    ifelse(length(votes) < 3 | votes[2] != votes[3], votes[1], votes[2])
-}
-
-ensemble_predict <- function(input_data_frame) {
-    input_data_frame$prediction <- NA
-    for (user_name in levels(input_data_frame$user_name)) {
-        data_frame = input_data_frame[input_data_frame$user_name == user_name,]
-        index = which(my_models$user_name == user_name & my_models$method == 'rf')
-        model = my_model_list[index]
-        data_frame$predict_rf <- predict(model, data_frame)[[1]]
-        index = which(my_models$user_name == user_name & my_models$method == 'knn')
-        model = my_model_list[index]
-        data_frame$predict_knn <- predict(model, data_frame)[[1]]
-        index = which(my_models$user_name == user_name & my_models$method == 'nb')
-        model = my_model_list[index]
-        data_frame$predict_nb <- predict(model, data_frame)[[1]]
-    }
-    input_data_frame$prediction <- apply(input_data_frame, 1, tally_votes)
-    input_data_frame
-}
-
 ```
 
 ### Results
 
-The accuracy of the ensemble classifier in the verification dataset is shown in the following confusion matrix.
+The accuracy in the verification dataset of the best classifier obtained is shown in the following confusion matrix.
 
 ```{r estimated_accuracy}
-my_verify_normalized_df <- predict(preNormalization, my_verify_df[,-length(colnames(my_verify_df))])
-verifyPC <- predict(prePCA_caret, my_verify_normalized_df)
-verify_data <- verifyPC
-verify_data$user_name <- train_csv_df[!(train_csv_df$num_window %in% inTrain),]$user_name
-verify_data <- ensemble_predict(verify_data)
-classe <- train_csv_df[!(train_csv_df$num_window %in% inTrain),]$classe
-confusionMatrix(verify_data$prediction, classe)
-
+confusionMatrix(train_ensemble_data$prediction_rf, train_ensemble_data$classe)
 ```
 
 It is even possible to check the predictions in the test dataset, since there is a function that obtains the class of the corresponding data series.
 
 ```{r accuracy_on_test_set}
-test_valid_sensor_data_df <- test_csv_df[,!cols_all_na][,seq(8,59)]
-my_test_normalized_df <- predict(preNormalization, my_test_df[,-length(colnames(my_test_df))])
-testPC <- predict(prePCA_caret, my_test_normalized_df)
-test_data <- testPC
-test_data$user_name <- test_csv_df$user_name
-test_data <- ensemble_predict(test_data)
-classe <- apply(test_data, 1, get_classe)
-confusionMatrix(test_data$prediction, classe)
+test_prediction <- predict(rf_model, test_csv_df)
+## Only two errors!
+for (idx in 1:20) { print(get_classe(test_csv_df[idx,])$classe == as.character(test_prediction[idx])) }
 ```
