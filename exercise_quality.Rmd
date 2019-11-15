@@ -23,7 +23,7 @@ train_csv_df <- read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pm
 test_csv_df <- read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv')
 ```
 
-A first look at the data reveals more information about the problem that we are trying to solve. In the next step, both the training and test CSV files are analyzed, not in order to shape the prediction algorithm, but in order to know what is it the exercise is about.
+In the next step, both the training and test CSV files are analyzed, not in order to shape the prediction algorithm, but in order to know what is it the exercise is about.
 
 ### Observations on the exercise objectives:
 
@@ -46,9 +46,7 @@ According to the previous observations:
 
 - Only sensor data will be considered.
 
-- Complete series will be used in training and test dataset.
-
-- It is also verified that there are no NA values in the training data.
+- Complete series will be used when splitting the data in order to verify the accuracy of the models.
 
 ```{r clean_up_data}
 ## Verify that all datapoints in a series have the same classe
@@ -64,7 +62,7 @@ train_valid_sensor_data_df <- train_csv_df[,!cols_all_na][,seq(8,59)]
 ## Add the variable that is to be predicted
 train_valid_sensor_data_df$classe <- train_csv_df$classe
 ## There are no NA values now in the dataframe
-are_there_any_nas <- length(train_valid_sensor_data_df$roll_belt) != length(complete.cases(train_valid_sensor_data_df))
+length(train_valid_sensor_data_df$roll_belt) == length(complete.cases(train_valid_sensor_data_df))
 ```
 
 ### Data Slicing
@@ -123,17 +121,17 @@ trainPC <- predict(prePCA_caret, my_train_normalized_df)
 At this point, since we have six different users in the system, I would like to know if the data under analysis is similar from one user to the other. Even though only datapoints from this six different are present in the test dataset, it seems interesting to know if the prediction should be done in a user per user basis or can be applied to data coming from any user. The following figure shows a clear difference in the data collected from each of the users. This would mean that (at least until data from more users is present) it would make sense to produce predictions per user. "user_name" will be added to the Principal Components as input to the models, and it will not be reliable to predict the "classe" for datapoints that have a "user_name" that was not included in the training set. Fortunately, this does not occur in our current test data.
 
 ```{r relationship_with_user_name}
-train_data_rf <- my_train_df
-train_data_rf$user_name <- train_csv_df[inTrainModels,]$user_name
-train_data_rf$classe <- train_csv_df[inTrainModels,]$classe
+train_data_raw <- my_train_df
+train_data_raw$user_name <- train_csv_df[inTrainModels,]$user_name
+train_data_raw$classe <- train_csv_df[inTrainModels,]$classe
 dummy <- dummyVars(~ user_name, train_csv_df[inTrainModels,])
-train_data_knn <- cbind(trainPC, predict(dummy, train_csv_df[inTrainModels,]))
-train_data_knn$classe <- train_csv_df[inTrainModels,]$classe
+train_data_norm <- cbind(trainPC, predict(dummy, train_csv_df[inTrainModels,]))
+train_data_norm$classe <- train_csv_df[inTrainModels,]$classe
 
 ```
 
 ```{r plot_1, echo=FALSE}
-qplot(train_data_rf$user_name, train_data_knn$PC1, fill=train_data_knn$classe, geom=c("boxplot"))
+qplot(train_data_raw$user_name, train_data_norm$PC1, fill=train_data_norm$classe, geom=c("boxplot"))
 ```
 
 ### Poll Ensemble
@@ -143,23 +141,24 @@ The goal is to train a ensemble of a Random Forest, a K Nearest Neighbors and a 
 ```{r poll_ensemble}
 ## Since these are computationally expensive, set up parallel processing
 library(doParallel)
-cl <- makePSOCKcluster(4)
+cl <- makeCluster(detectCores())
 registerDoParallel(cl)
-## Training of the three models
-nb_model <- train(classe ~ ., data=train_data, method='nb')
 ## Predictions on the training set for the ensemble
-train_ensemble_data_rf <- my_train_ensemble_df
-train_ensemble_data_rf$user_name <- train_csv_df[inTrainEnsemble,]$user_name
-train_ensemble_data_rf$classe <- train_csv_df[inTrainEnsemble,]$classe
-rf_model <- train(classe ~ ., data=train_data_rf, method='rf')
+train_ensemble_data_raw <- my_train_ensemble_df
+train_ensemble_data_raw$user_name <- train_csv_df[inTrainEnsemble,]$user_name
+train_ensemble_data_raw$classe <- train_csv_df[inTrainEnsemble,]$classe
 prePCA_ensemble <- prcomp(my_train_normalized_df)
 my_train_ensemble_normalized_df <- predict(preNormalization, my_train_ensemble_df[,-length(colnames(my_train_ensemble_df))])
 trainEnsemblePC <- predict(prePCA_caret, my_train_ensemble_normalized_df)
-train_ensemble_data_knn <- cbind(trainEnsemblePC, predict(dummy, train_csv_df[inTrainEnsemble,]))
-train_ensemble_data_knn$classe <- train_csv_df[inTrainEnsemble,]$classe
-knn_model <- train(classe ~ ., data=train_data_knn, method='knn')
-svm_model <- train(classe ~ ., data=train_data_rf, method='svm')
-train_ensemble_data <- data.frame(train_csv_df[inTrainEnsemble,]$classe)
+train_ensemble_data_norm <- cbind(trainEnsemblePC, predict(dummy, train_csv_df[inTrainEnsemble,]))
+train_ensemble_data_norm$classe <- train_csv_df[inTrainEnsemble,]$classe
+rf_model <- train(classe ~ ., data=train_data_raw, method='rf')
+knn_model <- train(classe ~ ., data=train_data_norm, method='knn')
+svm_model <- train(classe ~ ., data=train_data_raw, method='svm')
+## Stop the cluster now that the training is  done
+stopCluster(cl)
+## Obtain the predictions
+train_ensemble_data <- data.frame(classe=train_csv_df[inTrainEnsemble,]$classe)
 train_ensemble_data$prediction_rf <- predict(rf_model, train_ensemble_data_rf)
 train_ensemble_data$prediction_knn <- predict(knn_model, train_ensemble_data_knn)
 train_ensemble_data$prediction_svm <- predict(svm_model, train_ensemble_data_rf)
