@@ -156,26 +156,19 @@ train_ensemble_data_norm <- cbind(trainEnsemblePC, predict(dummy, train_csv_df[i
 train_ensemble_data_norm$classe <- train_csv_df[inTrainEnsemble,]$classe
 rf_model <- train(classe ~ ., data=train_data_raw, method='rf')
 knn_model <- train(classe ~ ., data=train_data_norm, method='knn')
-svm_model <- train(classe ~ ., data=train_data_raw, method='svm')
+svm_model <- train(classe ~ ., data=train_data_raw, method='svmRadial')
 ## Stop the cluster now that the training is  done
 stopCluster(cl)
 ## Obtain the predictions
 train_ensemble_data <- data.frame(classe=train_csv_df[inTrainEnsemble,]$classe)
-train_ensemble_data$prediction_rf <- predict(rf_model, train_ensemble_data_rf)
-train_ensemble_data$prediction_knn <- predict(knn_model, train_ensemble_data_knn)
-train_ensemble_data$prediction_svm <- predict(svm_model, train_ensemble_data_rf)
+train_ensemble_data$prediction_rf <- predict(rf_model, train_ensemble_data_raw)
+train_ensemble_data$prediction_knn <- predict(knn_model, train_ensemble_data_norm)
+train_ensemble_data$prediction_svm <- predict(svm_model, train_ensemble_data_raw)
 ## Measure accuracy for each of the models
 confusionMatrix(train_ensemble_data$prediction_rf, train_ensemble_data$classe)
 confusionMatrix(train_ensemble_data$prediction_knn, train_ensemble_data$classe)
 confusionMatrix(train_ensemble_data$prediction_svm, train_ensemble_data$classe)
 ## Build a new model that combines the predictions
-ensemble_model <- train(classe ~ prediction_rf + prediction_knn + prediction_svm, data=train_ensemble_data, method='rf')
-train_ensemble_data$prediction_ensemble <- predict(ensemble_model, train_ensemble_data)
-predDF <- data.frame(
-  train_ensemble_data$prediction_rf,
-  train_ensemble_data$prediction_knn,
-  train_ensemble_data$prediction_svm,
-  classe=train_ensemble_data$classe)
 classe_levels <- levels(train_ensemble_data$classe)
 train_ensemble_data$prediction_ensemble_str <- ifelse(
   train_ensemble_data$prediction_svm == train_ensemble_data$prediction_knn,
@@ -188,7 +181,7 @@ confusionMatrix(train_ensemble_data$prediction_ensemble, train_ensemble_data$cla
 
 ### Results
 
-The accuracy in the verification dataset of the best classifier obtained is shown in the following confusion matrix.
+The accuracy in the verification dataset of the best classifier obtained is shown in the following confusion matrix. The ensemble did not work well in this case, it seems that SVM and KNN agreed in the wrong result quite often, so Random Forest is the best alternative.
 
 ```{r estimated_accuracy}
 confusionMatrix(train_ensemble_data$prediction_rf, train_ensemble_data$classe)
@@ -198,6 +191,6 @@ It is even possible to check the predictions in the test dataset, since there is
 
 ```{r accuracy_on_test_set}
 test_prediction <- predict(rf_model, test_csv_df)
-## Only two errors!
+## Only one error!
 for (idx in 1:20) { print(get_classe(test_csv_df[idx,])$classe == as.character(test_prediction[idx])) }
 ```
