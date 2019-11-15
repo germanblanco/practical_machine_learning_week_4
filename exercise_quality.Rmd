@@ -7,7 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-set.seed(1234567)
+set.seed(7777)
 library(caret)
 library(ggplot2)
 ```
@@ -51,6 +51,8 @@ According to the previous observations:
 ```{r clean_up_data}
 ## Verify that all datapoints in a series have the same classe
 series_classe <- aggregate(classe ~ user_name + num_window, data=train_csv_df, FUN=function(x) { paste(unique(x)) })
+## Samples for each user and classe will be needed in each split
+series_classe$to_split <- as.factor(paste(series_classe$user_name, series_classe$classe))
 ## function that returns the classe for each datapoint and was used to obtain the answers to the quize with 100% accuracy
 get_classe <- function(x) { series_classe[series_classe$user_name == x$user_name & series_classe$num_window == x$num_window,] }
 ## Example "prediction" on the test set
@@ -71,9 +73,10 @@ There are now 52 columns of numeric data in the training dataset. The next step 
 
 ```{r slice_out_verify}
 ## Slice out aprox. 25% of data of the total training dataset
-inTrainAll <- createDataPartition(y=series_classe$classe, p=0.75, list=FALSE)
+splits <- createDataPartition(y=series_classe$to_split, times=2, p=0.75, list=FALSE)
+inTrainAll <- splits[,1]
 ## Slice out aprox. 25% of data again to set aside for training the ensemble
-inTrain <- createDataPartition(y=series_classe[inTrainAll,]$classe, p=0.75, list=FALSE)
+inTrain <- splits[,2]
 ## Recover series identification information
 train_valid_sensor_data_df$num_window <- train_csv_df$num_window
 ## Data for final verification of the ensemble
@@ -127,7 +130,6 @@ train_data_raw$classe <- train_csv_df[inTrainModels,]$classe
 dummy <- dummyVars(~ user_name, train_csv_df[inTrainModels,])
 train_data_norm <- cbind(trainPC, predict(dummy, train_csv_df[inTrainModels,]))
 train_data_norm$classe <- train_csv_df[inTrainModels,]$classe
-
 ```
 
 ```{r plot_1, echo=FALSE}
