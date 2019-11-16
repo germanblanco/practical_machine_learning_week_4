@@ -311,7 +311,27 @@ trControl &lt;- trainControl(
     repeats=2,
     seeds=seeds)
 rf_model &lt;- train(classe ~ ., data=train_data_raw, method='rf', trControl=trControl)
-knn_model &lt;- train(classe ~ ., data=train_data_norm, method='knn')
+print(rf_model)</code></pre>
+<pre><code>## Random Forest 
+## 
+## 11556 samples
+##    53 predictor
+##     5 classes: 'A', 'B', 'C', 'D', 'E' 
+## 
+## No pre-processing
+## Resampling: Cross-Validated (10 fold, repeated 2 times) 
+## Summary of sample sizes: 10401, 10400, 10400, 10401, 10402, 10400, ... 
+## Resampling results across tuning parameters:
+## 
+##   mtry  Accuracy   Kappa    
+##    2    0.9948944  0.9935298
+##   29    0.9944187  0.9929271
+##   57    0.9861120  0.9824014
+## 
+## Accuracy was used to select the optimal model using the largest value.
+## The final value used for the model was mtry = 2.</code></pre>
+<p>The accuracy of Random Forest in the training data (above), which is obtained with cross validation, may be used as an estimate of out-of-sample error. In this case is 99%, which might be very optimistic.</p>
+<pre class="r"><code>knn_model &lt;- train(classe ~ ., data=train_data_norm, method='knn')
 svm_model &lt;- train(classe ~ ., data=train_data_norm, method='svmRadial')
 ## Stop the cluster now that the training is  done
 stopCluster(cl)
