@@ -142,7 +142,7 @@ qplot(train_data_raw$user_name, train_data_norm$PC1, fill=train_data_norm$classe
 
 The goal is to train a ensemble of a Random Forest, a K Nearest Neighbors and a Support Vector Machine classifiers. The Random Forest classifier uses data without normalization, since it is not a linear algorithm.
 
-```{r poll_ensemble}
+```{r random_forest}
 ## Since these are computationally expensive, set up parallel processing
 library(doParallel)
 cl <- makeCluster(detectCores())
@@ -164,6 +164,10 @@ trControl <- trainControl(
     repeats=2,
     seeds=seeds)
 rf_model <- train(classe ~ ., data=train_data_raw, method='rf', trControl=trControl)
+print(rf_model)
+```
+The accuracy of Random Forest in the training data (above), which is obtained with cross validation, may be used as an estimate of out-of-sample error. In this case is 99%, which might be very optimistic.
+```{r poll_ensemble}
 knn_model <- train(classe ~ ., data=train_data_norm, method='knn')
 svm_model <- train(classe ~ ., data=train_data_norm, method='svmRadial')
 ## Stop the cluster now that the training is  done
