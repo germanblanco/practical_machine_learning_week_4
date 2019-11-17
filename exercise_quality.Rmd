@@ -194,7 +194,15 @@ confusionMatrix(train_ensemble_data$prediction_ensemble, train_ensemble_data$cla
 
 ### Results
 
-The best accuracy in the verification dataset is obtained with the Random Forest classifier. The ensemble did not work well in this case, it seems that SVM and KNN agreed in the wrong result quite often, so Random Forest is the best alternative.
+The best accuracy in the verification dataset is obtained with the Random Forest classifier. The ensemble did not work well in this case, it seems that SVM and KNN agreed in the wrong result quite often, so Random Forest is the best alternative. So finally the selected algorithm is evaluated in the verification dataset to estimate performance.
+
+```{r verification}
+my_verify_raw <- my_verify_df
+my_verify_raw$user_name <- train_csv_df[inVerify,]$user_name
+my_verify_raw$prediction <- predict(rf_model, my_verify_raw)
+my_verify_raw$classe <- train_csv_df[inVerify,]$classe
+confusionMatrix(my_verify_raw$prediction, my_verify_raw$classe)
+```
 
 It is even possible to check the predictions in the test dataset, since there is a function that obtains the class of the corresponding data series.
 
